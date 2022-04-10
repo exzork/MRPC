@@ -3,7 +3,7 @@ apply plugin: 'com.android.application'
 android {
     compileSdkVersion 29
     defaultConfig {
-        applicationId "com.exzork.mrpc"
+        applicationId "com.kdt.mrpc"
         minSdkVersion 19
         targetSdkVersion 29
         versionCode 2
