@@ -28,11 +28,10 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.ByteBuffer;
-import java.util.List;
-import java.util.Map;
-import java.util.SortedMap;
-import java.util.TreeMap;
+import java.util.*;
 import java.util.concurrent.ScheduledExecutorService;
+
+import static com.kdt.mrpc.MainActivity.appendlnToLog;
 
 public class BackgroundService extends Service {
     private Gson gson = new GsonBuilder().setPrettyPrinting().serializeNulls().create();
@@ -45,6 +44,7 @@ public class BackgroundService extends Service {
     private Thread heartbeatThr, wsThr, statusUpdateThr;
     private int heartbeat_interval, seq;
     private String authToken;
+    private ArrayList<String> whitelist;
 
     public class LocalBinder extends Binder {
         public BackgroundService getService() {
@@ -58,9 +58,6 @@ public class BackgroundService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             notificationManager.createNotificationChannel(new NotificationChannel("notification", "notification", NotificationManager.IMPORTANCE_HIGH));
         }
-        // Display a notification about us starting.  We put an icon in the status bar.
-        showNotification();
-
 
         heartbeatRunnable = new Runnable(){
             @Override
@@ -73,11 +70,17 @@ public class BackgroundService extends Service {
             }
         };
 
-        pref = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
+        pref = getSharedPreferences("pref", MODE_PRIVATE);
+        authToken = pref.getString("authToken", null);
+        whitelist = new ArrayList<String>(pref.getStringSet("selected_app", null));
+        Log.d("whitelist", whitelist.toString());
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // Display a notification about us starting.  We put an icon in the status bar.
+        showNotification();
+
         Log.i("LocalService", "Received start id " + startId + ": " + intent);
 
         if(!extractToken()){
@@ -100,18 +103,21 @@ public class BackgroundService extends Service {
                 public void run() {
                     if (webSocketClient.isOpen()) {
                         String opened_app_name = getOpenedAppName();
-                        if(!last_app_name[0].equals(opened_app_name)){
+                        if(whitelist.contains(opened_app_name)) {
+                            if (!last_app_name[0].equals(opened_app_name)) {
+                                String assetId = getAssetIdFromPackage(opened_app_name);
+                                Log.d("BackgroundService", "Opened app: " + opened_app_name + " assetId: " + assetId);
 
-                            String assetId = getAssetIdFromPackage(opened_app_name);
-                            Log.d("BackgroundService", "Opened app: " + opened_app_name + " assetId: " + assetId);
-
-                            last_app_name[0] = opened_app_name;
-                            String app_name = getAppNameFromPackage(opened_app_name, getApplicationContext());
-                            if(app_name!= null){
-                                setActivity(app_name, assetId);
-                            }else{
-                                setActivity(opened_app_name, assetId);
+                                last_app_name[0] = opened_app_name;
+                                String app_name = getAppNameFromPackage(opened_app_name, getApplicationContext());
+                                if (app_name != null) {
+                                    setActivity(app_name, assetId);
+                                } else {
+                                    setActivity(opened_app_name, assetId);
+                                }
                             }
+                        }else{
+                            setActivity("", "");
                         }
                     }
                     handler.postDelayed(this, 1000);
@@ -120,7 +126,7 @@ public class BackgroundService extends Service {
 
         }
 
-        return START_NOT_STICKY;
+        return START_STICKY;
     }
 
     @Override
@@ -158,7 +164,8 @@ public class BackgroundService extends Service {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             notification = new Notification.Builder(this, "notification")
                     .setTicker(text)  // the status text
-                    .setSmallIcon(R.drawable.abc_vector_test)
+                    .setOngoing(true)
+                    .setSmallIcon(R.drawable.ic_launcher_foreground)
                     .setWhen(System.currentTimeMillis())  // the time stamp
                     .setContentTitle(getText(R.string.app_name))  // the label of the entry
                     .setContentText(text)  // the contents of the entry
@@ -248,6 +255,7 @@ public class BackgroundService extends Service {
                     case 0: // Dispatch event
                         if (((String)map.get("t")).equals("READY")) {
                             Map data = (Map) ((Map)map.get("d")).get("user");
+                            appendlnToLog("Connected to " + data.get("username") + "#" + data.get("discriminator"));
                             return;
                         }
                         break;

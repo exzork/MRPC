@@ -2,11 +2,13 @@ package com.kdt.mrpc;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.*;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
-import androidx.preference.PreferenceManager;
-import android.util.ArrayMap;
 import android.util.Log;
 import android.view.View;
 import android.webkit.WebView;
@@ -18,20 +20,15 @@ import android.widget.TextView;
 import android.widget.Toast;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.google.gson.reflect.TypeToken;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.FilenameFilter;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.nio.ByteBuffer;
-import java.util.Map;
-import java.util.concurrent.CountDownLatch;
+import java.util.*;
+import java.util.stream.Collectors;
 
 import org.java_websocket.client.WebSocketClient;
-import org.java_websocket.handshake.ServerHandshake;
-import javax.net.ssl.SSLParameters;
 
 public class MainActivity extends Activity 
 {
@@ -41,13 +38,14 @@ public class MainActivity extends Activity
 
     private Runnable heartbeatRunnable;
     public static WebSocketClient webSocketClient;
+    public static ArrayList<String> whiteList = new ArrayList<>();
     private Thread heartbeatThr, wsThr;
     private int heartbeat_interval, seq;
     private String authToken;
 
     private WebView webView;
-    private TextView textviewLog;
-    private Button buttonConnect, buttonSetActivity;
+    private static TextView textviewLog;
+    private Button buttonConnect, buttonSetActivity, selectApp;
     private EditText editActivityName, editActivityState, editActivityDetails;
     private ImageButton imageIcon;
 
@@ -83,25 +81,84 @@ public class MainActivity extends Activity
         buttonConnect = (Button) findViewById(R.id.buttonConnect);
         buttonSetActivity = (Button) findViewById(R.id.buttonSetActivity);
         buttonSetActivity.setEnabled(true);
-        editActivityName = (EditText) findViewById(R.id.editActivityName);
-        editActivityState = (EditText) findViewById(R.id.editActivityState);
-        editActivityDetails = (EditText) findViewById(R.id.editActivityDetails);
-        imageIcon = (ImageButton) findViewById(R.id.imageIcon);
+        selectApp = (Button) findViewById(R.id.select_app);
+
+        pref = getSharedPreferences("pref", MODE_PRIVATE);
+        authToken = pref.getString("authToken", null);
     }
 
-    public void sendPresenceUpdate(View v) {
+    public void setSelectApp(View v) {
+        ArrayList<String> checkedApp = new ArrayList<String>();
+        String[] appList = packageNameAndAppName().keySet().toArray(new String[0]);
+        String[] appNames = packageNameAndAppName().values().toArray(new String[0]);
+        boolean[] checkedItems = new boolean[appList.length];
+
+        pref = getSharedPreferences("pref", MODE_PRIVATE);
+        if (pref.getStringSet("selected_app", null) != null) {
+            checkedApp = new ArrayList<String>(pref.getStringSet("selected_app", null));
+            whiteList = checkedApp;
+            if (checkedApp.size() > 0) {
+                for (int i = 0; i < appList.length; i++) {
+                    if (checkedApp.contains(appList[i])) {
+                        checkedItems[i] = true;
+                    }
+                }
+            }
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Select App");
+        builder.setCancelable(true);
+        ArrayList<String> finalCheckedApp = checkedApp;
+        builder.setMultiChoiceItems(appNames, checkedItems, new DialogInterface.OnMultiChoiceClickListener() {
+            @Override
+            public void onClick(DialogInterface dialogInterface, int i, boolean b) {
+                if(b) {
+                    finalCheckedApp.add(appList[i]);
+                }else{
+                    finalCheckedApp.remove(appList[i]);
+                }
+            }
+        });
+
+
+        ArrayList<String> finalCheckedApp1 = checkedApp;
+        builder.setPositiveButton("OK", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialogInterface, int i) {
+                Log.d("App", "Selected app: " + finalCheckedApp1);
+                Set<String> selectedApp = new HashSet<String>(finalCheckedApp1);
+                pref.edit().putStringSet("selected_app", selectedApp).apply();
+                whiteList = finalCheckedApp1;
+            }
+        });
+
+        builder.setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialogInterface, int i) {
+                dialogInterface.dismiss();
+            }
+        });
+
+        ArrayList<String> finalCheckedApp2 = checkedApp;
+        builder.setNeutralButton("Clear", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialogInterface, int i) {
+                finalCheckedApp2.clear();
+                Arrays.fill(checkedItems, false);
+            }
+        });
+        builder.show();
+    }
+
+    public void disconnect(View v) {
 
         stopService(new Intent(this, BackgroundService.class));
         doUnbindService();
     }
 
-    public void appendlnToLog(final String msg) {
-        runOnUiThread(new Runnable(){
-            @Override
-            public void run() {
-                textviewLog.append(msg + "\n");
-            }
-        });
+    public static void appendlnToLog(final String msg) {
+        textviewLog.append(msg + "\n");
     }
 
     public void login(View v) {
@@ -119,8 +176,12 @@ public class MainActivity extends Activity
     }
 
     public void connect(View v) {
-        doBindService();
-        startService(new Intent(this, BackgroundService.class));
+        if(authToken != null) {
+            doBindService();
+            startService(new Intent(this, BackgroundService.class));
+        }else{
+            Toast.makeText(this, "Please login first", Toast.LENGTH_SHORT).show();
+        }
     }
 
     public boolean extractToken() {
@@ -147,12 +208,15 @@ public class MainActivity extends Activity
             line = line.substring(line.indexOf("token") + 5);
             line = line.substring(line.indexOf("\"") + 1);
             authToken = line.substring(0, line.indexOf("\""));
+            pref.edit().putString("authToken", authToken).apply();
             return true;
         } catch (Throwable e) {
-            appendlnToLog("Failed extracting token: " + Log.getStackTraceString(e));
+            appendlnToLog("Failed extracting token");
             return false;
         }
     }
+
+
 
 
     private boolean mShouldUnbind;
@@ -215,4 +279,19 @@ public class MainActivity extends Activity
         doUnbindService();
     }
 
+
+    private Map<String, String> packageNameAndAppName(){
+        Map<String, String> map = new HashMap<>();
+        PackageManager pm = getPackageManager();
+        List<ApplicationInfo> packages = pm.getInstalledApplications(PackageManager.GET_META_DATA);
+        for (ApplicationInfo packageInfo : packages) {
+            map.put(packageInfo.packageName, packageInfo.loadLabel(pm).toString());
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            return map.entrySet().stream().sorted(Map.Entry.comparingByValue()).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (e1, e2) -> e1, LinkedHashMap::new));
+        }else{
+            return map;
+        }
+    }
 }

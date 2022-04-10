@@ -12,65 +12,47 @@
 		android:id="@+id/buttonLogin"/>
 
 	<LinearLayout
-		android:layout_width="match_parent"
-		android:layout_height="match_parent"
-		android:orientation="vertical"
-		android:layout_below="@id/buttonLogin">
+			android:layout_width="match_parent"
+			android:layout_height="match_parent"
+			android:orientation="vertical"
+			android:layout_below="@id/buttonLogin">
 
 		<Button
-			android:layout_height="wrap_content"
-			android:layout_width="match_parent"
-			android:text="Connect"
-			android:onClick="connect"
-			android:id="@+id/buttonConnect"/>
+				android:layout_height="wrap_content"
+				android:layout_width="match_parent"
+				android:text="Connect and Start Listening"
+				android:onClick="connect"
+				android:id="@+id/buttonConnect"/>
 
 		<LinearLayout
-			android:layout_height="wrap_content"
-			android:layout_width="match_parent"
-			android:orientation="horizontal">
-
-			<ImageButton
-				android:layout_height="40dp"
-				android:layout_width="40dp"
-				android:id="@+id/imageIcon"/>
-
-			<EditText
 				android:layout_height="wrap_content"
 				android:layout_width="match_parent"
-				android:hint="Activity name (leave empty to unset)"
-				android:id="@+id/editActivityName"/>
-
-		</LinearLayout>
-
-        <EditText
-            android:layout_height="wrap_content"
-            android:layout_width="match_parent"
-            android:id="@+id/editActivityState"
-            android:hint="Activity state"/>
-
-		<EditText
-			android:layout_height="wrap_content"
-			android:layout_width="match_parent"
-			android:id="@+id/editActivityDetails"
-			android:hint="Activity details"/>
+				android:orientation="horizontal"/>
 
 		<Button
-			android:layout_height="wrap_content"
-			android:layout_width="match_parent"
-			android:text="Set activity"
-			android:onClick="sendPresenceUpdate"
-			android:id="@+id/buttonSetActivity"/>
-
-		<ScrollView
-			android:layout_height="wrap_content"
-			android:layout_width="match_parent">
-
-			<TextView
 				android:layout_height="wrap_content"
 				android:layout_width="match_parent"
-				android:hint="Log output"
-				android:id="@+id/textviewLog"
-				android:typeface="monospace"/>
+				android:text="Disconnect"
+				android:onClick="disconnect"
+				android:id="@+id/buttonSetActivity"/>
+
+		<Button
+				android:text="whitelist app"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:onClick="setSelectApp"
+				android:id="@+id/select_app"/>
+
+		<ScrollView
+				android:layout_height="wrap_content"
+				android:layout_width="match_parent">
+
+			<TextView
+					android:layout_height="wrap_content"
+					android:layout_width="match_parent"
+					android:hint="Log output"
+					android:id="@+id/textviewLog"
+					android:typeface="monospace"/>
 
 		</ScrollView>
 
