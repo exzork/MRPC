@@ -1,9 +1,11 @@
 package com.kdt.mrpc;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.content.SharedPreferences;
+import android.content.*;
 import android.os.Bundle;
-import android.preference.PreferenceManager;
+import android.os.IBinder;
+import androidx.preference.PreferenceManager;
 import android.util.ArrayMap;
 import android.util.Log;
 import android.view.View;
@@ -25,6 +27,8 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
 import javax.net.ssl.SSLParameters;
@@ -36,7 +40,7 @@ public class MainActivity extends Activity
     private Gson gson = new GsonBuilder().setPrettyPrinting().serializeNulls().create();
 
     private Runnable heartbeatRunnable;
-    private WebSocketClient webSocketClient;
+    public static WebSocketClient webSocketClient;
     private Thread heartbeatThr, wsThr;
     private int heartbeat_interval, seq;
     private String authToken;
@@ -47,26 +51,13 @@ public class MainActivity extends Activity
     private EditText editActivityName, editActivityState, editActivityDetails;
     private ImageButton imageIcon;
 
+    @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState)
     {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.main);
 
-        heartbeatRunnable = new Runnable(){
-            @Override
-            public void run() {
-                try {
-                    appendlnToLog("Heartbeat wait for " + heartbeat_interval);
-                    if (heartbeat_interval < 10000) throw new RuntimeException("invalid");
-                    Thread.sleep(heartbeat_interval);
-                    webSocketClient.send(/*encodeString*/("{\"op\":1, \"d\":" + (seq==0?"null":Integer.toString(seq)) + "}"));
-                    appendlnToLog("Heartbeat sent");
-                } catch (InterruptedException e) {}
-            }
-        };
-
-        pref = PreferenceManager.getDefaultSharedPreferences(this);
 
         webView = (WebView) findViewById(R.id.mainWebView);
         webView.getSettings().setJavaScriptEnabled(true);
@@ -91,207 +82,17 @@ public class MainActivity extends Activity
         textviewLog = (TextView) findViewById(R.id.textviewLog);
         buttonConnect = (Button) findViewById(R.id.buttonConnect);
         buttonSetActivity = (Button) findViewById(R.id.buttonSetActivity);
-        buttonSetActivity.setEnabled(false);
+        buttonSetActivity.setEnabled(true);
         editActivityName = (EditText) findViewById(R.id.editActivityName);
         editActivityState = (EditText) findViewById(R.id.editActivityState);
         editActivityDetails = (EditText) findViewById(R.id.editActivityDetails);
         imageIcon = (ImageButton) findViewById(R.id.imageIcon);
     }
-    /*
-     @Override
-     protected void onResume() {
-     super.onResume();
-     Uri data = getIntent().getData(); 
-     if (data != null && wsThr == null) {
-     if (data.toString().contains("access_token=")) {
-     accessToken = data.toString().substring(
-     data.toString().indexOf("access_token=") + 13,
-     data.toString().indexOf("&expires_in")
-     );
-     actualConnect(null);
-     } else {
-     actualConnect(data.getQueryParameter("code"));
-     }
-     }
-     }
-     */
 
     public void sendPresenceUpdate(View v) {
-        long current = System.currentTimeMillis();
 
-        ArrayMap<String, Object> presence = new ArrayMap<>();
-
-        if (editActivityName.getText().toString().isEmpty()) {
-            presence.put("activities", new Object[]{});
-        } else {
-            ArrayMap<String, Object> activity = new ArrayMap<>();
-            activity.put("name", editActivityName.getText().toString());
-            if (!editActivityState.getText().toString().isEmpty()) {
-                activity.put("state", editActivityState.getText().toString());
-            }
-            if (!editActivityDetails.getText().toString().isEmpty()) {
-                activity.put("details", editActivityDetails.getText().toString());
-            }
-            activity.put("type", 0);
-            
-            // activity.put("application_id", "567994086452363286");
-            ArrayMap<String, Object> button = new ArrayMap<>();
-            button.put("label", "Open GitHub");
-            button.put("url", "https://github.com");
-            // activity.put("buttons", new Object[]{button});
-
-            ArrayMap<String, Object> timestamps = new ArrayMap<>();
-            timestamps.put("start", current);
-
-            activity.put("timestamps", timestamps);
-            presence.put("activities", new Object[]{activity});
-        }
-
-        presence.put("afk", true);
-        presence.put("since", current);
-        presence.put("status", null);
-
-        ArrayMap<String, Object> arr = new ArrayMap<>();
-        arr.put("op", 3);
-        arr.put("d", presence);
-
-        webSocketClient.send(gson.toJson(arr));
-    }
-
-    private void sendIdentify() {
-        ArrayMap<String, Object> prop = new ArrayMap<>();
-        prop.put("$os", "linux");
-        prop.put("$browser", "Discord Android");
-        prop.put("$device", "unknown");
-
-        ArrayMap<String, Object> data = new ArrayMap<>();
-        data.put("token", authToken);
-        data.put("properties", prop);
-        data.put("compress", false);
-        data.put("intents", 0);
-
-        ArrayMap<String, Object> arr = new ArrayMap<>();
-        arr.put("op", 2);
-        arr.put("d", data);
-
-        webSocketClient.send(gson.toJson(arr));
-    }
-
-    private void createWebSocketClient() {
-        appendlnToLog("Connecting...");
-
-        URI uri;
-        try {
-            uri = new URI("wss://gateway.discord.gg/?encoding=json&v=9"); // &compress=zlib-stream");
-        }
-        catch (URISyntaxException e) {
-            e.printStackTrace();
-            return;
-        }
-
-        ArrayMap<String, String> headerMap = new ArrayMap<>();
-        //headerMap.put("Accept-Encoding", "gzip");
-        //headerMap.put("Content-Type", "gzip");
-
-        webSocketClient = new WebSocketClient(uri, headerMap) {
-            @Override
-            public void onOpen(ServerHandshake s) {
-                appendlnToLog("Connection opened");
-            }
-
-            @Override
-            public void onMessage(ByteBuffer message) {
-                // onMessage(decodeString(message.array()));
-            }
-
-            @Override
-            public void onMessage(String message) {
-                // appendlnToLog("onTextReceived: " + message);
-
-                ArrayMap<String, Object> map = gson.fromJson(
-                    message, new TypeToken<ArrayMap<String, Object>>() {}.getType()
-                );
-
-                // obtain sequence number
-                Object o = map.get("s");
-                if (o != null) {
-                    seq = ((Double)o).intValue();
-                }
-
-                int opcode = ((Double)map.get("op")).intValue();
-                switch (opcode) {
-                    case 0: // Dispatch event
-                        if (((String)map.get("t")).equals("READY")) {
-                            appendlnToLog("Received READY event");
-                            Map data = (Map) ((Map)map.get("d")).get("user");
-                            appendlnToLog("Connected to " + data.get("username") + "#" + data.get("discriminator"));
-                            runOnUiThread(new Runnable() {
-                                @Override
-                                public void run() {
-                                    buttonSetActivity.setEnabled(true);
-                                }
-                            });
-                            return;
-                        }
-                        break;
-                    case 10: // Hello
-                        Map data = (Map) map.get("d");
-                        heartbeat_interval = ((Double)data.get("heartbeat_interval")).intValue();
-                        heartbeatThr = new Thread(heartbeatRunnable);
-                        heartbeatThr.start();
-                        sendIdentify();
-                        break;
-                    case 1: // Heartbeat request
-                        if (!heartbeatThr.interrupted()) {
-                            heartbeatThr.interrupt();
-                        }
-                        webSocketClient.send(/*encodeString*/("{\"op\":1, \"d\":" + (seq==0?"null":Integer.toString(seq)) + "}"));
-
-                        break;
-                    case 11: // Heartbeat ACK
-                        if (!heartbeatThr.interrupted()) {
-                            heartbeatThr.interrupt();
-                        }
-                        heartbeatThr = new Thread(heartbeatRunnable);
-                        heartbeatThr.start();
-                        break;
-                }
-                //appendlnToLog("Received op " + opcode + ": " + message);
-            }
-
-            @Override
-            public void onClose(int code, String reason, boolean remote) {
-                appendlnToLog("Connection closed with exit code " + code + " additional info: " + reason + "\n");
-                if (!heartbeatThr.interrupted()) {
-                    heartbeatThr.interrupt();
-                }
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        buttonConnect.setText("Connect");
-                        buttonSetActivity.setEnabled(false);
-                    }
-                });
-                throw new RuntimeException("Interrupt");
-            }
-
-            @Override
-            public void onError(Exception e) {
-                if (!e.getMessage().equals("Interrupt")) {
-                    appendlnToLog(Log.getStackTraceString(e));
-                }
-            }
-
-            @Override
-            protected void onSetSSLParameters(SSLParameters p) {
-                try {
-                    super.onSetSSLParameters(p);
-                } catch (Throwable th) {
-                    th.printStackTrace();
-                }
-            }
-        };
-        webSocketClient.connect();
+        stopService(new Intent(this, BackgroundService.class));
+        doUnbindService();
     }
 
     public void appendlnToLog(final String msg) {
@@ -311,9 +112,6 @@ public class MainActivity extends Activity
         }
         if (authToken != null) {
             appendlnToLog("Logged in");
-            if (v == null) {
-                actualConnect();
-            }
             return;
         }
         webView.setVisibility(View.VISIBLE);
@@ -321,31 +119,8 @@ public class MainActivity extends Activity
     }
 
     public void connect(View v) {
-        if (!extractToken()) {
-            Toast.makeText(this, "Token is not found, opening login page", Toast.LENGTH_SHORT).show();
-            login(null);
-        } else {
-            actualConnect();
-        }
-    }
-
-    public void actualConnect() {
-        if (buttonConnect.getText().equals("Connect")) {
-            wsThr = new Thread(new Runnable(){
-                @Override
-                public void run() {
-                    createWebSocketClient();
-                }
-            });
-            buttonConnect.setText("Disconnect");
-            wsThr.start();
-        } else {
-            heartbeatThr.interrupt();
-            webSocketClient.close(1000);
-            wsThr.interrupt();
-            buttonConnect.setText("Connect");
-            buttonSetActivity.setEnabled(false);
-        }
+        doBindService();
+        startService(new Intent(this, BackgroundService.class));
     }
 
     public boolean extractToken() {
@@ -379,72 +154,65 @@ public class MainActivity extends Activity
         }
     }
 
-    /*
-     public void code2AccessToken(String code) {
-     try {
-     HttpURLConnection conn = (HttpURLConnection) new URL("https://discord.com/api/oauth2/token").openConnection();
-     conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-     conn.setDoInput(true);
 
-     ArrayMap<String, Object> prop = new ArrayMap<>();
-     prop.put("client_id", "591317049637339146");
-     prop.put("client_secret", "Discord Android");
-     prop.put("grant_type", "authorization_code");
-     prop.put("code", code);
-     prop.put("redirect_url", "https://account.samsung.com/accounts/oauth/callback");
+    private boolean mShouldUnbind;
 
-     byte[] arr = gson.toJson(prop).getBytes();
+    // To invoke the bound service, first make sure that this value
+    // is not null.
+    private BackgroundService mBoundService;
 
-     conn.getOutputStream().write(arr, 0, arr.length);
-     } catch (Throwable e) {
-     throw new RuntimeException(e);
-     }
-     }
+    private ServiceConnection mConnection = new ServiceConnection() {
+        public void onServiceConnected(ComponentName className, IBinder service) {
+            // This is called when the connection with the service has been
+            // established, giving us the service object we can use to
+            // interact with the service.  Because we have bound to a explicit
+            // service that we know is running in our own process, we can
+            // cast its IBinder to a concrete class and directly access it.
+            mBoundService = ((BackgroundService.LocalBinder)service).getService();
 
-    public String decodeString(byte[] arr) {
-        Inflater i = new Inflater();
-        i.setInput(arr, 0, arr.length);
-        ByteArrayOutputStream bos = new ByteArrayOutputStream(arr.length); 
-        byte[] buf = new byte[1024];
-        try {
-            int count = 1;
-            while (!i.finished() && count > 0)  { 
-                count = i.inflate(buf);
-                appendlnToLog("decode " + count);
-                bos.write(buf, 0, count); 
-            }
-        } catch (DataFormatException e) {
-            throw new RuntimeException(e);
+            // Tell the user about this for our demo.
+            Toast.makeText(MainActivity.this, "Service connected",
+                    Toast.LENGTH_SHORT).show();
         }
-        i.end();
-        try {
-            bos.close();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+
+        public void onServiceDisconnected(ComponentName className) {
+            // This is called when the connection with the service has been
+            // unexpectedly disconnected -- that is, its process crashed.
+            // Because it is running in our same process, we should never
+            // see this happen.
+            mBoundService = null;
+            Toast.makeText(MainActivity.this, "Service disconnected",
+                    Toast.LENGTH_SHORT).show();
         }
-        return new String(bos.toByteArray());
+    };
+
+    void doBindService() {
+        // Attempts to establish a connection with the service.  We use an
+        // explicit class name because we want a specific service
+        // implementation that we know will be running in our own process
+        // (and thus won't be supporting component replacement by other
+        // applications).
+        if (bindService(new Intent(MainActivity.this, BackgroundService.class),
+                mConnection, Context.BIND_AUTO_CREATE)) {
+            mShouldUnbind = true;
+        } else {
+            Log.e("MY_APP_TAG", "Error: The requested service doesn't " +
+                    "exist, or this client isn't allowed access to it.");
+        }
     }
 
-    public byte[] encodeString(String str) {
-        byte[] arr = str.getBytes();
-        Deflater compresser = new Deflater();
-        compresser.setInput(arr);
-        compresser.finish();
-        ByteArrayOutputStream bos = new ByteArrayOutputStream(arr.length); 
-        // Compress the data 
-        byte[] buf = new byte[1024]; 
-        while (!compresser.finished())  { 
-            int count = compresser.deflate(buf); 
-            bos.write(buf, 0, count);
-        } 
-        compresser.end();
-        try {
-            bos.close();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+    void doUnbindService() {
+        if (mShouldUnbind) {
+            // Release information about the service's state.
+            unbindService(mConnection);
+            mShouldUnbind = false;
         }
-        
-        return bos.toByteArray();
     }
- */
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        doUnbindService();
+    }
+
 }
