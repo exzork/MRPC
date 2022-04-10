@@ -6,8 +6,8 @@ android {
         applicationId "com.kdt.mrpc"
         minSdkVersion 19
         targetSdkVersion 29
-        versionCode 2
-        versionName "1.1-pre"
+        versionCode 3
+        versionName "1.1.1-pre"
     }
     buildTypes {
         release {

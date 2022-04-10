@@ -11,6 +11,7 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.util.Log;
 import android.view.View;
+import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
@@ -18,6 +19,7 @@ import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.TextView;
 import android.widget.Toast;
+import androidx.annotation.RequiresApi;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
@@ -64,16 +66,17 @@ public class MainActivity extends Activity
         webView.getSettings().setDomStorageEnabled(true);
         webView.setWebViewClient(new WebViewClient() {
             @Override
-            public boolean shouldOverrideUrlLoading(WebView v, String url) {
-                Log.d("Web", "Attempt to enter " + url);
+            @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                Log.d("Web", "Attempt to enter " + request.getUrl().toString());
                 webView.stopLoading();
-                if (url.endsWith("/app")) {
+                if (request.getUrl().toString().endsWith("/app")) {
                     webView.setVisibility(View.GONE);
                     extractToken();
-                    login(v);
+                    login(view);
                 }
                 return false;
-                // super.shouldOverrideUrlLoading(v, url);
+                //super.shouldOverrideUrlLoading(view, request.getUrl().toString());
             }
         });
 
@@ -285,7 +288,9 @@ public class MainActivity extends Activity
         PackageManager pm = getPackageManager();
         List<ApplicationInfo> packages = pm.getInstalledApplications(PackageManager.GET_META_DATA);
         for (ApplicationInfo packageInfo : packages) {
-            map.put(packageInfo.packageName, packageInfo.loadLabel(pm).toString());
+            if ((packageInfo.flags & ApplicationInfo.FLAG_SYSTEM) == 0) {
+                map.put(packageInfo.packageName, packageInfo.loadLabel(pm).toString());
+            }
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {

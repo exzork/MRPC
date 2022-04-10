@@ -7,10 +7,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ResolveInfo;
-import android.os.Binder;
-import android.os.Build;
-import android.os.Handler;
-import android.os.IBinder;
+import android.os.*;
 import android.util.ArrayMap;
 import android.util.Log;
 import android.widget.Toast;
@@ -44,6 +41,7 @@ public class BackgroundService extends Service {
     private Thread heartbeatThr, wsThr, statusUpdateThr;
     private int heartbeat_interval, seq;
     private String authToken;
+    private String sessionId;
     private ArrayList<String> whitelist;
 
     public class LocalBinder extends Binder {
@@ -66,13 +64,21 @@ public class BackgroundService extends Service {
                     if (heartbeat_interval < 10000) throw new RuntimeException("invalid");
                     Thread.sleep(heartbeat_interval);
                     webSocketClient.send(/*encodeString*/("{\"op\":1, \"d\":" + (seq==0?"null":Integer.toString(seq)) + "}"));
-                } catch (InterruptedException e) {}
+                } catch (Exception e) {
+                    if (e instanceof InterruptedException) {
+                        createWebSocketClient();
+                    }
+                }
             }
         };
 
         pref = getSharedPreferences("pref", MODE_PRIVATE);
         authToken = pref.getString("authToken", null);
-        whitelist = new ArrayList<String>(pref.getStringSet("selected_app", null));
+        if(pref.getStringSet("selected_app", null)!=null){
+            whitelist = new ArrayList<String>(pref.getStringSet("selected_app", null));
+        }else{
+            whitelist = new ArrayList<String>();
+        }
         Log.d("whitelist", whitelist.toString());
     }
 
@@ -103,21 +109,22 @@ public class BackgroundService extends Service {
                 public void run() {
                     if (webSocketClient.isOpen()) {
                         String opened_app_name = getOpenedAppName();
-                        if(whitelist.contains(opened_app_name)) {
-                            if (!last_app_name[0].equals(opened_app_name)) {
+                        Log.d("opened_app_name", opened_app_name);
+                        if (!last_app_name[0].equals(opened_app_name)) {
+                            last_app_name[0] = opened_app_name;
+                            if(whitelist.contains(opened_app_name)){
                                 String assetId = getAssetIdFromPackage(opened_app_name);
                                 Log.d("BackgroundService", "Opened app: " + opened_app_name + " assetId: " + assetId);
 
-                                last_app_name[0] = opened_app_name;
                                 String app_name = getAppNameFromPackage(opened_app_name, getApplicationContext());
                                 if (app_name != null) {
                                     setActivity(app_name, assetId);
                                 } else {
                                     setActivity(opened_app_name, assetId);
                                 }
+                            }else{
+                                setActivity("", "");
                             }
-                        }else{
-                            setActivity("", "");
                         }
                     }
                     handler.postDelayed(this, 1000);
@@ -226,10 +233,20 @@ public class BackgroundService extends Service {
         //headerMap.put("Accept-Encoding", "gzip");
         //headerMap.put("Content-Type", "gzip");
 
-        webSocketClient = new WebSocketClient(uri, headerMap) {
+        webSocketClient = wsClient(uri, headerMap);
+        webSocketClient.connect();
+    }
+
+    private WebSocketClient wsClient(URI uri, ArrayMap<String, String> headerMap) {
+        return new WebSocketClient(uri, headerMap) {
             @Override
             public void onOpen(ServerHandshake s) {
+                if (sessionId != null) {
+                    Log.d("WEBSOCKET", "Reconnecting Session ID: " + sessionId);
+                    webSocketClient.send(gson.toJson(getResumePayload()));
+                }
             }
+
 
             @Override
             public void onMessage(ByteBuffer message) {
@@ -255,6 +272,8 @@ public class BackgroundService extends Service {
                     case 0: // Dispatch event
                         if (((String)map.get("t")).equals("READY")) {
                             Map data = (Map) ((Map)map.get("d")).get("user");
+                            sessionId = ((Map)(map.get("d"))).get("session_id").toString();
+                            Log.d("SESSION", sessionId);
                             appendlnToLog("Connected to " + data.get("username") + "#" + data.get("discriminator"));
                             return;
                         }
@@ -265,13 +284,14 @@ public class BackgroundService extends Service {
                         heartbeatThr = new Thread(heartbeatRunnable);
                         heartbeatThr.start();
                         sendIdentify();
+                        Log.d("HEARTBEAT", "Started1");
                         break;
                     case 1: // Heartbeat request
                         if (!heartbeatThr.interrupted()) {
                             heartbeatThr.interrupt();
                         }
                         webSocketClient.send(/*encodeString*/("{\"op\":1, \"d\":" + (seq==0?"null":Integer.toString(seq)) + "}"));
-
+                        Log.d("HEARTBEAT", "Sent");
                         break;
                     case 11: // Heartbeat ACK
                         if (!heartbeatThr.interrupted()) {
@@ -279,6 +299,7 @@ public class BackgroundService extends Service {
                         }
                         heartbeatThr = new Thread(heartbeatRunnable);
                         heartbeatThr.start();
+                        Log.d("HEARTBEAT", "Started2");
                         break;
                 }
                 //appendlnToLog("Received op " + opcode + ": " + message);
@@ -286,14 +307,22 @@ public class BackgroundService extends Service {
 
             @Override
             public void onClose(int code, String reason, boolean remote) {
-                if (!heartbeatThr.interrupted()) {
-                    heartbeatThr.interrupt();
-                }
-                throw new RuntimeException("Interrupt");
+                Log.d("WEBSOCKET", "Closed: " + reason + ", Code : "+code);
+                final Handler handler = new Handler(Looper.getMainLooper());
+                handler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        webSocketClient = null;
+                        webSocketClient = wsClient(uri, headerMap);
+                        webSocketClient.connect();
+                        sessionId = null;
+                    }
+                },3000);
             }
 
             @Override
             public void onError(Exception e) {
+                Log.d("WEBSOCKET", "Error: " + e.getMessage());
             }
 
             @Override
@@ -305,7 +334,17 @@ public class BackgroundService extends Service {
                 }
             }
         };
-        webSocketClient.connect();
+    }
+
+    private Map getResumePayload() {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("op", 6);
+        payload.put("d", new HashMap<String, Object>() {{
+            put("token", authToken);
+            put("session_id", sessionId);
+            put("seq", seq);
+        }});
+        return payload;
     }
 
     private void sendIdentify() {
