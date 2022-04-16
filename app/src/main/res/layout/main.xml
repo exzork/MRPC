@@ -18,30 +18,23 @@
 			android:layout_below="@id/buttonLogin">
 
 		<Button
+				android:text="whitelist app"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:onClick="setSelectApp"
+				android:tag="0"
+				android:id="@+id/select_app"/>
+		<Button
 				android:layout_height="wrap_content"
 				android:layout_width="match_parent"
-				android:text="Connect and Start Listening"
-				android:onClick="connect"
-				android:id="@+id/buttonConnect"/>
+				android:text="Connect"
+				android:onClick="connectDisconnect"
+				android:id="@+id/buttonConnectDisconnect"/>
 
 		<LinearLayout
 				android:layout_height="wrap_content"
 				android:layout_width="match_parent"
 				android:orientation="horizontal"/>
-
-		<Button
-				android:layout_height="wrap_content"
-				android:layout_width="match_parent"
-				android:text="Disconnect"
-				android:onClick="disconnect"
-				android:id="@+id/buttonSetActivity"/>
-
-		<Button
-				android:text="whitelist app"
-				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:onClick="setSelectApp"
-				android:id="@+id/select_app"/>
 
 		<ScrollView
 				android:layout_height="wrap_content"

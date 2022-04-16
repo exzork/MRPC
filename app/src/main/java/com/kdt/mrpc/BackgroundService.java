@@ -140,8 +140,7 @@ public class BackgroundService extends Service {
     public void onDestroy() {
         // Cancel the persistent notification.
         notificationManager.cancel(NOTIFICATION);
-        setActivity("", "");
-
+        //webSocketClient.close();
         // Tell the user we stopped.
         Toast.makeText(this, R.string.app_name, Toast.LENGTH_SHORT).show();
     }
@@ -244,6 +243,7 @@ public class BackgroundService extends Service {
                 if (sessionId != null) {
                     Log.d("WEBSOCKET", "Reconnecting Session ID: " + sessionId);
                     webSocketClient.send(gson.toJson(getResumePayload()));
+                    sessionId = null;
                 }
             }
 
@@ -274,7 +274,9 @@ public class BackgroundService extends Service {
                             Map data = (Map) ((Map)map.get("d")).get("user");
                             sessionId = ((Map)(map.get("d"))).get("session_id").toString();
                             Log.d("SESSION", sessionId);
-                            appendlnToLog("Connected to " + data.get("username") + "#" + data.get("discriminator"));
+                            try{
+                                appendlnToLog("Connected to " + data.get("username") + "#" + data.get("discriminator"));
+                            }catch (Exception e){}
                             return;
                         }
                         break;
@@ -315,7 +317,6 @@ public class BackgroundService extends Service {
                         webSocketClient = null;
                         webSocketClient = wsClient(uri, headerMap);
                         webSocketClient.connect();
-                        sessionId = null;
                     }
                 },3000);
             }
@@ -369,7 +370,10 @@ public class BackgroundService extends Service {
     public boolean extractToken() {
         // ~~extract token in an ugly way :troll:~~
         try {
-            File f = new File(getFilesDir().getParentFile(), "app_webview/Default/Local Storage/leveldb");
+            File f = new File(getFilesDir().getParentFile(), "app_webview/Local Storage/leveldb");
+            if (!f.exists()) {
+                f = new File(getFilesDir().getParentFile(), "app_webview/Default/Local Storage/leveldb");
+            }
             File[] fArr = f.listFiles(new FilenameFilter(){
                 @Override
                 public boolean accept(File file, String name) {

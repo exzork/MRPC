@@ -12,13 +12,10 @@ import android.os.IBinder;
 import android.util.Log;
 import android.view.View;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.Button;
-import android.widget.EditText;
-import android.widget.ImageButton;
-import android.widget.TextView;
-import android.widget.Toast;
+import android.widget.*;
 import androidx.annotation.RequiresApi;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -32,8 +29,7 @@ import java.util.stream.Collectors;
 
 import org.java_websocket.client.WebSocketClient;
 
-public class MainActivity extends Activity 
-{
+public class MainActivity extends Activity {
     private SharedPreferences pref;
 
     private Gson gson = new GsonBuilder().setPrettyPrinting().serializeNulls().create();
@@ -47,14 +43,13 @@ public class MainActivity extends Activity
 
     private WebView webView;
     private static TextView textviewLog;
-    private Button buttonConnect, buttonSetActivity, selectApp;
+    private Button buttonConnectDisconnect, buttonSetActivity, selectApp, buttonLogin;
     private EditText editActivityName, editActivityState, editActivityDetails;
     private ImageButton imageIcon;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
-    protected void onCreate(Bundle savedInstanceState)
-    {
+    protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.main);
 
@@ -73,7 +68,9 @@ public class MainActivity extends Activity
                 if (request.getUrl().toString().endsWith("/app")) {
                     webView.setVisibility(View.GONE);
                     extractToken();
-                    login(view);
+                    if (authToken == null) {
+                        login(view);
+                    }
                 }
                 return false;
                 //super.shouldOverrideUrlLoading(view, request.getUrl().toString());
@@ -81,19 +78,23 @@ public class MainActivity extends Activity
         });
 
         textviewLog = (TextView) findViewById(R.id.textviewLog);
-        buttonConnect = (Button) findViewById(R.id.buttonConnect);
-        buttonSetActivity = (Button) findViewById(R.id.buttonSetActivity);
-        buttonSetActivity.setEnabled(true);
+        buttonConnectDisconnect = (Button) findViewById(R.id.buttonConnectDisconnect);
+        buttonLogin = (Button) findViewById(R.id.buttonLogin);
         selectApp = (Button) findViewById(R.id.select_app);
 
         pref = getSharedPreferences("pref", MODE_PRIVATE);
         authToken = pref.getString("authToken", null);
+
+        if (authToken != null) {
+            buttonLogin.setText("Logout");
+        }
     }
 
     public void setSelectApp(View v) {
+        int mode = v.getTag() == null ? 1 : Integer.parseInt(v.getTag().toString());
         ArrayList<String> checkedApp = new ArrayList<String>();
-        String[] appList = packageNameAndAppName().keySet().toArray(new String[0]);
-        String[] appNames = packageNameAndAppName().values().toArray(new String[0]);
+        String[] appList = packageNameAndAppName(mode).keySet().toArray(new String[0]);
+        String[] appNames = packageNameAndAppName(mode).values().toArray(new String[0]);
         boolean[] checkedItems = new boolean[appList.length];
 
         pref = getSharedPreferences("pref", MODE_PRIVATE);
@@ -116,9 +117,9 @@ public class MainActivity extends Activity
         builder.setMultiChoiceItems(appNames, checkedItems, new DialogInterface.OnMultiChoiceClickListener() {
             @Override
             public void onClick(DialogInterface dialogInterface, int i, boolean b) {
-                if(b) {
+                if (b) {
                     finalCheckedApp.add(appList[i]);
-                }else{
+                } else {
                     finalCheckedApp.remove(appList[i]);
                 }
             }
@@ -144,20 +145,20 @@ public class MainActivity extends Activity
         });
 
         ArrayList<String> finalCheckedApp2 = checkedApp;
-        builder.setNeutralButton("Clear", new DialogInterface.OnClickListener() {
+        String neutralText = mode == 0 ? "Show System App" : "Hide System App";
+        builder.setNeutralButton(neutralText, new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialogInterface, int i) {
-                finalCheckedApp2.clear();
-                Arrays.fill(checkedItems, false);
+                if (mode == 0) {
+                    v.setTag(null);
+                    setSelectApp(v);
+                } else if (mode == 1) {
+                    v.setTag(0);
+                    setSelectApp(v);
+                }
             }
         });
         builder.show();
-    }
-
-    public void disconnect(View v) {
-
-        stopService(new Intent(this, BackgroundService.class));
-        doUnbindService();
     }
 
     public static void appendlnToLog(final String msg) {
@@ -165,38 +166,55 @@ public class MainActivity extends Activity
     }
 
     public void login(View v) {
-        if (webView.getVisibility() == View.VISIBLE) {
-            webView.stopLoading();
-            webView.setVisibility(View.GONE);
-            return;
-        }
-        if (authToken != null) {
-            appendlnToLog("Logged in");
-            return;
-        }
-        webView.setVisibility(View.VISIBLE);
-        webView.loadUrl("https://discord.com/login");
-    }
-
-    public void connect(View v) {
-        if(authToken != null) {
-            doBindService();
-            startService(new Intent(this, BackgroundService.class));
+        if (buttonLogin.getText().toString().equals("Login")) {
+            if (webView.getVisibility() == View.VISIBLE) {
+                webView.stopLoading();
+                webView.setVisibility(View.GONE);
+                return;
+            }
+            webView.setVisibility(View.VISIBLE);
+            webView.loadUrl("https://discord.com/login");
         }else{
-            Toast.makeText(this, "Please login first", Toast.LENGTH_SHORT).show();
+            pref.edit().putString("authToken", null).apply();
+            WebStorage.getInstance().deleteAllData();
+            buttonLogin.setText("Login");
         }
     }
 
+    public void connectDisconnect(View v) {
+        if (buttonConnectDisconnect.getText().toString().equals("Connect")) {
+            if (authToken != null) {
+                doBindService();
+                startService(new Intent(this, BackgroundService.class));
+                buttonConnectDisconnect.setText("Disconnect");
+            } else {
+                Toast.makeText(this, "Please login first", Toast.LENGTH_SHORT).show();
+            }
+        } else {
+            stopService(new Intent(this, BackgroundService.class));
+            doUnbindService();
+            buttonConnectDisconnect.setText("Connect");
+        }
+    }
+
+    @SuppressLint("SetTextI18n")
     public boolean extractToken() {
         // ~~extract token in an ugly way :troll:~~
         try {
-            File f = new File(getFilesDir().getParentFile(), "app_webview/Default/Local Storage/leveldb");
-            File[] fArr = f.listFiles(new FilenameFilter(){
+            File f = new File(getFilesDir().getParentFile(), "app_webview/Local Storage/leveldb");
+            if (!f.exists()) {
+                f = new File(getFilesDir().getParentFile(), "app_webview/Default/Local Storage/leveldb");
+            }
+            File[] fArr = f.listFiles(new FilenameFilter() {
                 @Override
                 public boolean accept(File file, String name) {
                     return name.endsWith(".log");
                 }
             });
+            for (File f1 : fArr) {
+                Log.d("File", f1.getName());
+            }
+
             if (fArr.length == 0) {
                 return false;
             }
@@ -212,14 +230,14 @@ public class MainActivity extends Activity
             line = line.substring(line.indexOf("\"") + 1);
             authToken = line.substring(0, line.indexOf("\""));
             pref.edit().putString("authToken", authToken).apply();
+            Log.d("Token", authToken);
+            buttonLogin.setText("Logout");
             return true;
         } catch (Throwable e) {
-            appendlnToLog("Failed extracting token");
+            appendlnToLog(e.getMessage());
             return false;
         }
     }
-
-
 
 
     private boolean mShouldUnbind;
@@ -235,7 +253,7 @@ public class MainActivity extends Activity
             // interact with the service.  Because we have bound to a explicit
             // service that we know is running in our own process, we can
             // cast its IBinder to a concrete class and directly access it.
-            mBoundService = ((BackgroundService.LocalBinder)service).getService();
+            mBoundService = ((BackgroundService.LocalBinder) service).getService();
 
             // Tell the user about this for our demo.
             Toast.makeText(MainActivity.this, "Service connected",
@@ -283,19 +301,23 @@ public class MainActivity extends Activity
     }
 
 
-    private Map<String, String> packageNameAndAppName(){
+    private Map<String, String> packageNameAndAppName(int mode) {
         Map<String, String> map = new HashMap<>();
         PackageManager pm = getPackageManager();
         List<ApplicationInfo> packages = pm.getInstalledApplications(PackageManager.GET_META_DATA);
         for (ApplicationInfo packageInfo : packages) {
-            if ((packageInfo.flags & ApplicationInfo.FLAG_SYSTEM) == 0) {
+            if (mode == 0) {
+                if ((packageInfo.flags & ApplicationInfo.FLAG_SYSTEM) == 0) {
+                    map.put(packageInfo.packageName, packageInfo.loadLabel(pm).toString());
+                }
+            } else if (mode == 1) {
                 map.put(packageInfo.packageName, packageInfo.loadLabel(pm).toString());
             }
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             return map.entrySet().stream().sorted(Map.Entry.comparingByValue()).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (e1, e2) -> e1, LinkedHashMap::new));
-        }else{
+        } else {
             return map;
         }
     }
