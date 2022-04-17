@@ -191,7 +191,7 @@ public class BackgroundService extends Service {
 
         if(!name.equals("")){
             activity.put("name", name);
-            activity.put("application_id", "962579538418749531");
+            activity.put("application_id", "964821620298489857");
             activity.put("type", 0);
             ArrayMap<String, Object> timestamps = new ArrayMap<>();
             timestamps.put("start", current);
@@ -445,7 +445,7 @@ public class BackgroundService extends Service {
             @Override
             public void run() {
                 try{
-                    URL url = new URL("https://discord.com/api/v9/oauth2/applications/962579538418749531/assets");
+                    URL url = new URL("https://discord.com/api/v9/oauth2/applications/964821620298489857/assets");
                     InputStream in = url.openStream();
                     InputStreamReader reader = new InputStreamReader(in);
                     List assets = gson.fromJson(reader, List.class);
