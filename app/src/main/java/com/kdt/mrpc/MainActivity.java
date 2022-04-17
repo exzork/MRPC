@@ -6,9 +6,16 @@ import android.app.AlertDialog;
 import android.content.*;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.res.Resources;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.View;
 import android.webkit.WebResourceRequest;
@@ -16,18 +23,24 @@ import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.*;
+import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.io.FilenameFilter;
+import java.io.*;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.net.URLConnection;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import com.google.gson.JsonObject;
 import org.java_websocket.client.WebSocketClient;
+import org.json.JSONObject;
+
+import javax.net.ssl.HttpsURLConnection;
 
 public class MainActivity extends Activity {
     private SharedPreferences pref;
@@ -46,6 +59,8 @@ public class MainActivity extends Activity {
     private Button buttonConnectDisconnect, buttonSetActivity, selectApp, buttonLogin;
     private EditText editActivityName, editActivityState, editActivityDetails;
     private ImageButton imageIcon;
+
+    private ArrayList<String> listSupportedIcon = new ArrayList<>();
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -88,6 +103,26 @@ public class MainActivity extends Activity {
         if (authToken != null) {
             buttonLogin.setText("Logout");
         }
+
+        new Thread(() -> {
+            try {
+                URL url = new URL("https://discord.com/api/v9/oauth2/applications/964821620298489857/assets");
+                InputStream in = url.openStream();
+                InputStreamReader reader = new InputStreamReader(in);
+                List assets = gson.fromJson(reader, List.class);
+                Log.d("Discord", assets.toString());
+                for (Object asset : assets) {
+                    if (asset instanceof Map) {
+                        Map<String, Object> assetMap = (Map<String, Object>) asset;
+                        String name = (String) assetMap.get("name");
+                        listSupportedIcon.add(name.replaceAll("_", "."));
+                    }
+                }
+            }catch (Exception e){
+                e.printStackTrace();
+            }
+        }).start();
+
     }
 
     public void setSelectApp(View v) {
@@ -134,6 +169,86 @@ public class MainActivity extends Activity {
                 Set<String> selectedApp = new HashSet<String>(finalCheckedApp1);
                 pref.edit().putStringSet("selected_app", selectedApp).apply();
                 whiteList = finalCheckedApp1;
+
+                Set<String> unsupportedApp = new HashSet<>();
+                for (String appName : whiteList) {
+                    if (!listSupportedIcon.contains(appName)) {
+                        unsupportedApp.add(appName);
+                    }
+                }
+
+                if (unsupportedApp.size() > 0) {
+                    AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+                    builder.setTitle("Unsupported App");
+                    builder.setMessage("Some of your selected app doesn't have icon in our database. Press UPLOAD to upload icon to our database. Note that it may take times to update because of discord caching.");
+                    builder.setPositiveButton("OK", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialogInterface, int i) {
+                            for (String appName : unsupportedApp) {
+                                try {
+                                    ApplicationInfo appInfo = getPackageManager().getApplicationInfo(appName, PackageManager.GET_META_DATA);
+                                    Resources res = getPackageManager().getResourcesForApplication(appName);
+                                    int iconId = appInfo.icon;
+                                    Drawable hRes = res.getDrawableForDensity(iconId, DisplayMetrics.DENSITY_XXXHIGH);
+                                    Bitmap bitmap = getBitmapFromDrawable(hRes);
+                                    ByteArrayOutputStream stream = new ByteArrayOutputStream();
+                                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream);
+                                    byte[] byteArray = stream.toByteArray();
+                                    String encoded = "";
+                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                        encoded = Base64.getEncoder().encodeToString(byteArray);
+                                    }
+                                    Map<String, String> icon = new HashMap<>();
+                                    icon.put("image", "data:image/png;base64," + encoded);
+                                    icon.put("name", appName.replace(".", "_"));
+                                    icon.put("type", "1");
+
+                                    JSONObject jsonObject = new JSONObject(icon);
+                                    byte[] json = jsonObject.toString().getBytes(StandardCharsets.UTF_8);
+
+                                    Thread thread = new Thread(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            try {
+                                                URL url = new URL("https://mrpc-server.exzork.me/upload");
+                                                URLConnection conn = url.openConnection();
+                                                HttpsURLConnection httpsConn = (HttpsURLConnection) conn;
+                                                httpsConn.setRequestMethod("POST");
+                                                httpsConn.setRequestProperty("Content-Type", "application/json");
+                                                httpsConn.setDoOutput(true);
+                                                httpsConn.setFixedLengthStreamingMode(json.length);
+                                                httpsConn.connect();
+                                                OutputStream os = httpsConn.getOutputStream();
+                                                os.write(json);
+                                                InputStream is = httpsConn.getInputStream();
+                                                BufferedReader in = new BufferedReader(new InputStreamReader(is));
+                                                String line;
+                                                while ((line = in.readLine()) != null) {
+                                                    Log.d("Response", line);
+                                                }
+                                                unsupportedApp.remove(appName);
+                                            } catch (Exception e) {
+                                                e.printStackTrace();
+                                            }
+                                        }
+                                    });
+                                    thread.start();
+
+                                    Log.d("App", "Uploaded icon for " + appName);
+                                }catch (Exception e){
+                                    e.printStackTrace();
+                                }
+                            }
+                        }
+                    });
+                    builder.setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialogInterface, int i) {
+                            dialogInterface.dismiss();
+                        }
+                    });
+                    builder.show();
+                }
             }
         });
 
@@ -320,5 +435,14 @@ public class MainActivity extends Activity {
         } else {
             return map;
         }
+    }
+
+    @NonNull
+    static private Bitmap getBitmapFromDrawable(@NonNull Drawable drawable) {
+        final Bitmap bmp = Bitmap.createBitmap(drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight(), Bitmap.Config.ARGB_8888);
+        final Canvas canvas = new Canvas(bmp);
+        drawable.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
+        drawable.draw(canvas);
+        return bmp;
     }
 }

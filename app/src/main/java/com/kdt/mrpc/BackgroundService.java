@@ -115,7 +115,6 @@ public class BackgroundService extends Service {
                             if(whitelist.contains(opened_app_name)){
                                 String assetId = getAssetIdFromPackage(opened_app_name);
                                 Log.d("BackgroundService", "Opened app: " + opened_app_name + " assetId: " + assetId);
-
                                 String app_name = getAppNameFromPackage(opened_app_name, getApplicationContext());
                                 if (app_name != null) {
                                     setActivity(app_name, assetId);
@@ -439,7 +438,7 @@ public class BackgroundService extends Service {
     }
 
     private String getAssetIdFromPackage(String packageName){
-        final String[] assetId = {"962595958397481041"};
+        final String[] assetId = {"964836281332936756"};
         final String packageNameTL = packageName.replace(".", "_");
         Thread checkAssetsId = new Thread(new Runnable() {
             @Override
